@@ -25,6 +25,10 @@ public class BLECandle {
     private Context mContext;
     private BluetoothDevice mDevice;
     private boolean mConnected = false;
+    private static final int STATE_DISCONNECTED = 0;
+    private static final int STATE_READY = 1;
+    private static final int STATE_WAITING = 2;
+    private int mState = STATE_DISCONNECTED;
 
     private final BluetoothGattCallback mGattCallback = new BluetoothGattCallback() {
         @Override
@@ -35,16 +39,19 @@ public class BLECandle {
                         mBluetoothGatt.discoverServices());
 
                 mConnected = true;
+                mState = STATE_DISCONNECTED;
 
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 Log.i(TAG, "Disconnected from GATT server.");
                 mConnected = false;
+                mState = STATE_READY;
             }
         }
 
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
+                mState = STATE_WAITING;
                 for (BluetoothGattService s : gatt.getServices()) {
                     Log.i(TAG, "Serivce: " + s.getUuid().toString());
 
@@ -57,9 +64,16 @@ public class BLECandle {
                         }
                     }
                 }
+                mState = STATE_READY;
             } else {
                 Log.w(TAG, "onServicesDiscovered received: " + status);
             }
+        }
+
+        @Override
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            Log.i(TAG, "onCharacteristicWrite");
+            BLECandle.this.mState = BLECandle.STATE_READY;
         }
     };
 
@@ -68,8 +82,26 @@ public class BLECandle {
         mDevice = device;
     }
 
+    public boolean isBusy() {
+        return !(mState == STATE_READY);
+    }
+
+    public String getDeviceAddress() {
+        return mDevice.getAddress();
+    }
+
     public void connectGatt() {
         mBluetoothGatt = mDevice.connectGatt(mContext, false, mGattCallback);
+    }
+
+    public void closeGatt() {
+        mBluetoothGatt.close();
+        mBluetoothGatt = null;
+        mCharacteristic = null;
+    }
+
+    public boolean hasCharacteristic() {
+        return mCharacteristic != null;
     }
 
     public boolean isConnected() {
@@ -81,6 +113,9 @@ public class BLECandle {
 
         if (mCharacteristic == null) {
             Log.i(TAG, "Can't write to null Characteristic");
+
+            this.connectGatt();
+
             return false;
         }
 
@@ -90,6 +125,8 @@ public class BLECandle {
             Log.w(TAG, "Failed to write characteristic");
             return false;
         }
+
+        mState = STATE_WAITING;
 
         return true;
     }
